@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Ensemble Control Panel</title>
+  <link rel="stylesheet" href="ensemble-ui.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      width: 380px;
+      min-height: 500px;
+    }
+  </style>
+</head>
+<body class="ensemble-popup">
+  <div class="popup-header">
+    <h1 class="popup-title">AI Ensemble</h1>
+    <p class="popup-subtitle">Multi-Model Coordination</p>
+  </div>
+  
+  <div class="popup-content">
+    <div style="background: rgba(255, 193, 7, 0.1); border: 1px solid rgba(255, 193, 7, 0.3); border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+      <div style="font-size: 13px; color: #ffc107; font-weight: 600; margin-bottom: 8px;">⚠️ ACTIVATION REQUIRED</div>
+      <div style="font-size: 12px; color: #fff; margin-bottom: 12px;">Click the button below on each AI tab to activate Ensemble Mode</div>
+      <button class="btn" id="activate-tab" style="width: 100%;">Activate This Tab</button>
+    </div>
+    
+    <div id="connection-summary" style="font-size: 12px; margin-bottom: 12px; font-weight: 600;">Checking connections...</div>
+    <h3 style="margin-top: 0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #00ff88;">Active Models</h3>
+    
+    <div class="model-status-grid" id="model-status">
+      <div class="model-card" data-model="claude">
+        <div class="model-name">
+          <span class="model-indicator"></span>
+          Claude
+        </div>
+        <div style="font-size: 12px; color: #999;">Waiting for connection...</div>
+      </div>
+      
+      <div class="model-card" data-model="chatgpt">
+        <div class="model-name">
+          <span class="model-indicator"></span>
+          ChatGPT
+        </div>
+        <div style="font-size: 12px; color: #999;">Waiting for connection...</div>
+      </div>
+      
+      <div class="model-card" data-model="gemini">
+        <div class="model-name">
+          <span class="model-indicator"></span>
+          Gemini
+        </div>
+        <div style="font-size: 12px; color: #999;">Waiting for connection...</div>
+      </div>
+    </div>
+    
+    <h3 style="font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #00ff88; margin-bottom: 12px;">Conversation Log</h3>
+    
+    <div class="conversation-log" id="conversation-log">
+      <div style="text-align: center; color: #666; padding: 40px 20px;">
+        <div style="font-size: 32px; margin-bottom: 12px;">🧠</div>
+        <div>No messages yet</div>
+        <div style="font-size: 11px; margin-top: 8px; opacity: 0.7;">Start a conversation in any AI platform</div>
+      </div>
+    </div>
+    
+    <div class="action-buttons">
+      <button class="btn btn-secondary" id="clear-log">Clear Log</button>
+      <button class="btn" id="export-log">Export</button>
+    </div>
+    
+    <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+      <div style="font-size: 11px; color: #666; text-align: center;">
+        <div style="margin-bottom: 12px; color: #00ff88;">
+          <strong>SETUP:</strong> Click the extension icon on each AI tab to activate
+        </div>
+        <div style="margin-bottom: 8px;">
+          1. Open Claude, ChatGPT, and Gemini in separate tabs<br>
+          2. Click this extension icon on each tab<br>
+          3. Look for the green badge to confirm activation
+        </div>
+        <div style="font-size: 10px; opacity: 0.7; margin-top: 12px;">
+          v1.7.7 • Made with ⚡ by Nolan Law Firm
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

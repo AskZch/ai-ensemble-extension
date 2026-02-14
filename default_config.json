@@ -1,0 +1,30 @@
+{
+  "configVersion": 1,
+  "minExtensionVersion": "1.6.0",
+  "killSwitch": false,
+  "ttlSeconds": 21600,
+  "debounceMs": 2200,
+  "platforms": {
+    "chatgpt": {
+      "enabled": true,
+      "killSwitch": false,
+      "latestAssistantSelector": "[data-message-author-role=\"assistant\"]",
+      "assistantTextSelector": ".markdown, [class*=\"markdown\"]",
+      "generatingSelector": "button[aria-label*=\"Stop\"], button:has(svg[aria-label*=\"Stop\"])"
+    },
+    "claude": {
+      "enabled": true,
+      "killSwitch": false,
+      "latestAssistantSelector": "[data-testid*=\"message\"]",
+      "assistantTextSelector": null,
+      "generatingSelector": "button:has(svg[aria-label*=\"Stop\"]), [data-is-streaming=\"true\"]"
+    },
+    "gemini": {
+      "enabled": true,
+      "killSwitch": false,
+      "latestAssistantSelector": "[id^=\"model-response-message-content\"], message-content, [id^=\"message-content-id\"]",
+      "assistantTextSelector": null,
+      "generatingSelector": "button[aria-label*=\"Stop\"], [data-test-id*=\"stop\"], [data-testid*=\"stop\"]"
+    }
+  }
+}
