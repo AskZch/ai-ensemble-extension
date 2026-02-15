@@ -53,7 +53,7 @@ chrome.runtime.onConnect.addListener((port) => {
 // ===============================
 // Remote Config
 // ===============================
-const REMOTE_CONFIG_URL = 'https://pattalkslaw-del.github.io/ai-ensemble-config/config.json';
+const REMOTE_CONFIG_URL = null; // PATCHED: no phone-home (AskZch fork)
 const CONFIG_CACHE_KEY = 'remoteConfigCache';
 const DEFAULT_CONFIG_URL = chrome.runtime.getURL('default_config.json');
 let configCache = null;
@@ -94,10 +94,8 @@ async function loadFallbackConfig() {
   return cfg;
 }
 async function fetchRemoteConfig() {
-  const res = await fetch(REMOTE_CONFIG_URL, { cache: 'no-store' });
-  const cfg = await res.json();
-  if (!validateConfig(cfg).ok) throw new Error('Invalid remote');
-  return cfg;
+  // PATCHED: Remote config disabled. Always uses local default_config.json
+  throw new Error('Remote config disabled - fully local fork');
 }
 function isExpired(entry) {
   if (!entry?.fetchedAt || !entry?.config) return true;
