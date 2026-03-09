@@ -1,13 +1,13 @@
-// Content script for Gemini — AI Ensemble v17.7
-// Port messaging + Gemini observer
-// v17.7: Input population now appends instead of replacing
+// Content script for DeepSeek (chat.deepseek.com) — AI Ensemble v1.8.0
+// Port-based messaging + DeepSeek observer
+// Follows same pattern as content-chatgpt.js
 
-if (window.__AI_ENSEMBLE_GEMINI_V17__) {
-  console.log('[AI Ensemble] Gemini already injected; skipping.');
+if (window.__AI_ENSEMBLE_DEEPSEEK_V17__) {
+  console.log('[AI Ensemble] DeepSeek already injected; skipping.');
 } else {
-window.__AI_ENSEMBLE_GEMINI_V17__ = true;
+window.__AI_ENSEMBLE_DEEPSEEK_V17__ = true;
 
-const PLATFORM = 'gemini';
+const PLATFORM = 'deepseek';
 let DEBOUNCE_MS = 2200;
 let CONFIG_PLATFORM = null;
 let GENERATING_SELECTOR = null;
@@ -15,10 +15,9 @@ let LATEST_ASSISTANT_SELECTOR = null;
 let ASSISTANT_TEXT_SELECTOR = null;
 let lastSentKey = null;
 let pendingTimer = null;
-let lastObservedText = "";
 let observer = null;
-
 let autoSubmitEnabled = false;
+
 let ensemblePort = null;
 let portReady = false;
 
@@ -51,8 +50,8 @@ connectPort();
 
 function applyConfig(config) {
   if (config?.debounceMs) DEBOUNCE_MS = config.debounceMs;
-  if (config?.platforms?.gemini) {
-    CONFIG_PLATFORM = config.platforms.gemini;
+  if (config?.platforms?.deepseek) {
+    CONFIG_PLATFORM = config.platforms.deepseek;
     GENERATING_SELECTOR = CONFIG_PLATFORM.generatingSelector || null;
     LATEST_ASSISTANT_SELECTOR = CONFIG_PLATFORM.latestAssistantSelector || null;
     ASSISTANT_TEXT_SELECTOR = CONFIG_PLATFORM.assistantTextSelector || null;
@@ -90,13 +89,25 @@ function queryLatestAssistantElement() {
 }
 
 function getLatestAssistantElement() {
+  // Try config-driven selector first
   const overrideEl = queryLatestAssistantElement();
   if (overrideEl) return overrideEl;
-  const modelTurns = document.querySelectorAll('model-response, .model-response-text, [data-turn-role="model"]');
-  if (modelTurns.length) return modelTurns[modelTurns.length - 1];
-  const msgContents = document.querySelectorAll('.message-content, [class*="response-container"]');
-  if (msgContents.length) return msgContents[msgContents.length - 1];
-  const messages = document.querySelectorAll('[data-testid*="message"], div[class*="prose"], div[class*="markdown"]');
+
+  // DeepSeek-specific fallbacks
+  // DeepSeek uses .ds-markdown for rendered responses
+  const dsMarkdown = document.querySelectorAll('.ds-markdown');
+  if (dsMarkdown.length) return dsMarkdown[dsMarkdown.length - 1];
+
+  // Try role-based selectors
+  const roleMsgs = document.querySelectorAll('[data-role="assistant"], [class*="assistant-message"], [class*="bot-message"]');
+  if (roleMsgs.length) return roleMsgs[roleMsgs.length - 1];
+
+  // Generic markdown containers
+  const markdownEls = document.querySelectorAll('[class*="markdown-body"], [class*="markdown"], [class*="prose"]');
+  if (markdownEls.length) return markdownEls[markdownEls.length - 1];
+
+  // Last resort
+  const messages = document.querySelectorAll('[data-testid*="message"], [class*="message"]');
   if (messages.length === 0) return null;
   return messages[messages.length - 1];
 }
@@ -105,7 +116,7 @@ function isStillGenerating() {
   if (GENERATING_SELECTOR) {
     try { return !!document.querySelector(GENERATING_SELECTOR); } catch(e) {}
   }
-  return !!document.querySelector('.loading-indicator, [class*="loading"], [class*="generating"], [aria-busy="true"]');
+  return !!document.querySelector('[class*="loading"], [class*="generating"], [aria-busy="true"], button[aria-label*="Stop"], [class*="stop-generating"]');
 }
 
 function scheduleStableForward(text, delayMs, callback) {
@@ -119,24 +130,26 @@ function scheduleStableForward(text, delayMs, callback) {
   }, delayMs);
 }
 
+let lastSentText = "";
+
 function processLatestAssistantMessage(element) {
   const excludeSelectors = CONFIG_PLATFORM?.excludeSelectors || null;
   const messageText = extractCleanText(element, excludeSelectors);
   if (!messageText || messageText.length < 15) return;
-  if (messageText === lastObservedText) return;
-  lastObservedText = messageText;
+  if (messageText === lastSentText) return;
   scheduleStableForward(messageText, DEBOUNCE_MS, (stableText) => {
+    if (stableText === lastSentText) return;
     const key = simpleHash(stableText);
     if (key === lastSentKey) return;
-    lastSentKey = key;
-    console.log('[AI Ensemble] Sending Gemini response to background');
+    lastSentKey = key; lastSentText = stableText;
+    console.log('[AI Ensemble] Sending DeepSeek response to background');
     safePost({ type: 'MODEL_RESPONSE', data: { platform: PLATFORM, message: stableText, timestamp: Date.now() } });
   });
 }
 
 function startResponseObserver() {
-  console.log('[AI Ensemble] Starting Gemini response observer');
-  const targetNode = document.querySelector('main') || document.body;
+  console.log('[AI Ensemble] Starting DeepSeek response observer');
+  const targetNode = document.querySelector('main') || document.querySelector('#root') || document.body;
   observer = new MutationObserver(() => {
     const el = getLatestAssistantElement();
     if (el) processLatestAssistantMessage(el);
@@ -148,23 +161,25 @@ function startResponseObserver() {
 let lastReceivedHash = null;
 
 function clickSendButton() {
-  const btn = document.querySelector('button[aria-label="Send message"]') ||
-              document.querySelector('button[aria-label*="Send"]') ||
-              document.querySelector('.send-button') ||
-              document.querySelector('button[mattooltip*="Send"]');
-  if (btn && !btn.disabled) { btn.click(); console.log('[AI Ensemble] Gemini auto-submitted'); }
+  const btn = document.querySelector('button[aria-label*="Send"]') ||
+              document.querySelector('button[aria-label*="send"]') ||
+              document.querySelector('#chat-input-send') ||
+              document.querySelector('button[data-testid*="send"]') ||
+              document.querySelector('div[class*="chat-input"] button') ||
+              document.querySelector('button[type="submit"]');
+  if (btn && !btn.disabled) { btn.click(); console.log('[AI Ensemble] DeepSeek auto-submitted'); }
 }
 
 function populateInputField(message, sourcePlatform) {
   const inHash = simpleHash(message);
   if (inHash === lastReceivedHash) return;
   lastReceivedHash = inHash;
-  console.log('[AI Ensemble] Attempting to populate Gemini input field');
-  const inputField = document.querySelector('.ql-editor[contenteditable="true"]') ||
-                     document.querySelector('[contenteditable="true"]') ||
+  console.log('[AI Ensemble] Attempting to populate DeepSeek input field');
+  const inputField = document.querySelector('textarea#chat-input') ||
                      document.querySelector('textarea') ||
+                     document.querySelector('[contenteditable="true"]') ||
                      document.querySelector('[role="textbox"]');
-  if (!inputField) { console.error('[AI Ensemble] Could not find Gemini input field'); return; }
+  if (!inputField) { console.error('[AI Ensemble] Could not find DeepSeek input field'); return; }
 
   const header = `[From ${sourcePlatform.toUpperCase()}]`;
   const newContent = `${header}\n${message}`;
@@ -181,10 +196,18 @@ function populateInputField(message, sourcePlatform) {
     inputField.dispatchEvent(new Event('input', { bubbles: true }));
   } else {
     const existing = (inputField.value || '').trim();
-    inputField.value = existing ? existing + '\n---\n' + newContent : newContent;
+    const newVal = existing ? existing + '\n---\n' + newContent : newContent;
+    // React-compatible value setter
+    const nativeSet = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    if (nativeSet) {
+      nativeSet.call(inputField, newVal);
+    } else {
+      inputField.value = newVal;
+    }
     inputField.dispatchEvent(new Event('input', { bubbles: true }));
+    inputField.dispatchEvent(new Event('change', { bubbles: true }));
   }
-  console.log('[AI Ensemble] Gemini input populated');
+  console.log('[AI Ensemble] DeepSeek input populated');
 
   if (autoSubmitEnabled) {
     setTimeout(() => clickSendButton(), 500);
@@ -195,7 +218,7 @@ chrome.runtime.onMessage.addListener((request) => {
   if (request.type === 'POPULATE_INPUT') populateInputField(request.data.message, request.data.sourcePlatform);
 });
 
-console.log('[AI Ensemble] Initializing Gemini integration (v17.7)');
+console.log('[AI Ensemble] Initializing DeepSeek integration (v1.8.0)');
 setTimeout(startResponseObserver, 1000);
 
 } // end injection guard

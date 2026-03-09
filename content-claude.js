@@ -17,6 +17,7 @@ let observer = null;
 // ===============================
 // PORT-BASED MESSAGING
 // ===============================
+let autoSubmitEnabled = false;
 let ensemblePort = null;
 let portReady = false;
 
@@ -38,6 +39,8 @@ function connectPort() {
         populateInputField(msg.data.message, msg.data.sourcePlatform);
       } else if (msg.type === 'CONFIG_RESPONSE' && msg.config) {
         applyConfig(msg.config);
+      } else if (msg.type === 'AUTO_SUBMIT_CHANGED') {
+        autoSubmitEnabled = msg.enabled;
       }
     });
   } catch(e) {
@@ -81,6 +84,9 @@ try {
     if (resp?.config) applyConfig(resp.config);
   });
 } catch(e) {}
+
+// Load auto-submit state
+try { chrome.storage.sync.get(['autoSubmit'], (r) => { autoSubmitEnabled = !!r?.autoSubmit; }); } catch(e) {}
 
 // ===============================
 // HASH UTILITY
@@ -248,6 +254,13 @@ function startResponseObserver() {
 // ===============================
 let lastReceivedHash = null;
 
+function clickSendButton() {
+  const btn = document.querySelector('button[aria-label="Send Message"]') ||
+              document.querySelector('button[aria-label*="Send"]') ||
+              document.querySelector('fieldset button:not([aria-label*="Stop"])');
+  if (btn && !btn.disabled) { btn.click(); console.log('[AI Ensemble] Claude auto-submitted'); }
+}
+
 function populateInputField(message, sourcePlatform) {
   const inHash = simpleHash(message);
   if (inHash === lastReceivedHash) return;
@@ -284,6 +297,10 @@ function populateInputField(message, sourcePlatform) {
     inputField.dispatchEvent(new Event('input', { bubbles: true }));
   }
   console.log('[AI Ensemble] Claude input populated');
+
+  if (autoSubmitEnabled) {
+    setTimeout(() => clickSendButton(), 500);
+  }
 }
 
 chrome.runtime.onMessage.addListener((request) => {
