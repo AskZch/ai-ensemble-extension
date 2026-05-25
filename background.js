@@ -53,7 +53,7 @@ chrome.runtime.onConnect.addListener((port) => {
 // ===============================
 // Remote Config
 // ===============================
-const REMOTE_CONFIG_URL = null; // PATCHED: no phone-home (AskZch fork)
+const REMOTE_CONFIG_URL = 'https://raw.githubusercontent.com/AskZch/ai-ensemble-extension/main/default_config.json';
 const CONFIG_CACHE_KEY = 'remoteConfigCache';
 const DEFAULT_CONFIG_URL = chrome.runtime.getURL('default_config.json');
 let configCache = null;
@@ -94,8 +94,12 @@ async function loadFallbackConfig() {
   return cfg;
 }
 async function fetchRemoteConfig() {
-  // PATCHED: Remote config disabled. Always uses local default_config.json
-  throw new Error('Remote config disabled - fully local fork');
+  if (!REMOTE_CONFIG_URL) throw new Error('No remote config URL');
+  const res = await fetch(REMOTE_CONFIG_URL, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Remote config HTTP ${res.status}`);
+  const cfg = await res.json();
+  if (!validateConfig(cfg).ok) throw new Error('Invalid remote config');
+  return cfg;
 }
 function isExpired(entry) {
   if (!entry?.fetchedAt || !entry?.config) return true;

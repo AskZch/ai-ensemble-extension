@@ -17,7 +17,7 @@
     "https://gemini.google.com/*",
     "https://grok.com/*",
     "https://chat.deepseek.com/*",
-    "https://pattalkslaw-del.github.io/*"
+    "https://raw.githubusercontent.com/AskZch/ai-ensemble-extension/*"
   ],
   "content_scripts": [
     {
