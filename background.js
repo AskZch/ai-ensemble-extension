@@ -2,7 +2,7 @@
 // Port-based messaging + Alarms keepalive + Remote Config
 // v17.7: Fixed GET_ACTIVE_MODELS to derive from active port connections
 
-const PLATFORMS = { CLAUDE: 'claude', CHATGPT: 'chatgpt', GEMINI: 'gemini' };
+const PLATFORMS = { CLAUDE: 'claude', CHATGPT: 'chatgpt', GEMINI: 'gemini', GROK: 'grok', DEEPSEEK: 'deepseek' };
 
 // ===============================
 // KEEPALIVE: Alarms API
@@ -53,7 +53,7 @@ chrome.runtime.onConnect.addListener((port) => {
 // ===============================
 // Remote Config
 // ===============================
-const REMOTE_CONFIG_URL = null; // PATCHED: no phone-home (AskZch fork)
+const REMOTE_CONFIG_URL = 'https://raw.githubusercontent.com/AskZch/ai-ensemble-extension/main/default_config.json';
 const CONFIG_CACHE_KEY = 'remoteConfigCache';
 const DEFAULT_CONFIG_URL = chrome.runtime.getURL('default_config.json');
 let configCache = null;
@@ -78,9 +78,9 @@ function validateConfig(cfg) {
   if (typeof cfg.killSwitch !== 'boolean') cfg.killSwitch = false;
   if (typeof cfg.minExtensionVersion !== 'string') cfg.minExtensionVersion = '0.0.0';
   if (!cfg.platforms || typeof cfg.platforms !== 'object') return { ok: false };
-  for (const p of ['claude','chatgpt','gemini']) {
+  for (const p of ['claude','chatgpt','gemini','grok','deepseek']) {
     const pc = cfg.platforms[p];
-    if (!pc) return { ok: false };
+    if (!pc) continue; // tolerate missing platforms for forward-compat
     if (typeof pc.enabled !== 'boolean') pc.enabled = true;
     if (typeof pc.killSwitch !== 'boolean') pc.killSwitch = false;
   }
@@ -94,8 +94,12 @@ async function loadFallbackConfig() {
   return cfg;
 }
 async function fetchRemoteConfig() {
-  // PATCHED: Remote config disabled. Always uses local default_config.json
-  throw new Error('Remote config disabled - fully local fork');
+  if (!REMOTE_CONFIG_URL) throw new Error('No remote config URL');
+  const res = await fetch(REMOTE_CONFIG_URL, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Remote config HTTP ${res.status}`);
+  const cfg = await res.json();
+  if (!validateConfig(cfg).ok) throw new Error('Invalid remote config');
+  return cfg;
 }
 function isExpired(entry) {
   if (!entry?.fetchedAt || !entry?.config) return true;
@@ -148,6 +152,8 @@ function handleModelResponse(data, sender) {
       if (tab.url?.includes('claude.ai')) target = 'claude';
       else if (tab.url?.includes('chatgpt.com') || tab.url?.includes('chat.openai.com')) target = 'chatgpt';
       else if (tab.url?.includes('gemini.google.com')) target = 'gemini';
+      else if (tab.url?.includes('grok.com')) target = 'grok';
+      else if (tab.url?.includes('chat.deepseek.com')) target = 'deepseek';
       if (target && target !== platform) {
         const payload = { type: 'POPULATE_INPUT', data: { message, sourcePlatform: platform } };
         const port = activePorts.get(tab.id);
@@ -178,6 +184,8 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
             if (tab.url?.includes('claude.ai')) liveModels.add('claude');
             else if (tab.url?.includes('chatgpt.com') || tab.url?.includes('chat.openai.com')) liveModels.add('chatgpt');
             else if (tab.url?.includes('gemini.google.com')) liveModels.add('gemini');
+            else if (tab.url?.includes('grok.com')) liveModels.add('grok');
+            else if (tab.url?.includes('chat.deepseek.com')) liveModels.add('deepseek');
           }
           sendResponse({ models: Array.from(liveModels) });
           break;
@@ -192,4 +200,21 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
   return true;
 });
 
-console.log('[AI Ensemble] Background v17.7 ready');
+// ===============================
+// AUTO-SUBMIT TOGGLE (Alt+Shift+S)
+// ===============================
+chrome.commands.onCommand.addListener((command) => {
+  if (command === 'toggle-auto-submit') {
+    chrome.storage.sync.get(['autoSubmit'], (r) => {
+      const newVal = !r.autoSubmit;
+      chrome.storage.sync.set({ autoSubmit: newVal });
+      // Notify all active content scripts
+      activePorts.forEach((port) => {
+        try { port.postMessage({ type: 'AUTO_SUBMIT_CHANGED', enabled: newVal }); } catch(e) {}
+      });
+      console.log(`[AI Ensemble] Auto-submit ${newVal ? 'ENABLED' : 'DISABLED'}`);
+    });
+  }
+});
+
+console.log('[AI Ensemble] Background v1.8.0 ready');

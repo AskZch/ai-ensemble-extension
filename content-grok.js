@@ -1,13 +1,13 @@
-// Content script for Gemini — AI Ensemble v1.8.1
-// Updated: Neural Expressive redesign (May 2026) selectors
-// model-response + message-content custom elements confirmed current
+// Content script for Grok (grok.com) — AI Ensemble v1.8.0
+// Port-based messaging + Grok observer
+// Follows same pattern as content-chatgpt.js
 
-if (window.__AI_ENSEMBLE_GEMINI_V17__) {
-  console.log('[AI Ensemble] Gemini already injected; skipping.');
+if (window.__AI_ENSEMBLE_GROK_V17__) {
+  console.log('[AI Ensemble] Grok already injected; skipping.');
 } else {
-window.__AI_ENSEMBLE_GEMINI_V17__ = true;
+window.__AI_ENSEMBLE_GROK_V17__ = true;
 
-const PLATFORM = 'gemini';
+const PLATFORM = 'grok';
 let DEBOUNCE_MS = 2200;
 let CONFIG_PLATFORM = null;
 let GENERATING_SELECTOR = null;
@@ -15,10 +15,9 @@ let LATEST_ASSISTANT_SELECTOR = null;
 let ASSISTANT_TEXT_SELECTOR = null;
 let lastSentKey = null;
 let pendingTimer = null;
-let lastObservedText = "";
 let observer = null;
-
 let autoSubmitEnabled = false;
+
 let ensemblePort = null;
 let portReady = false;
 
@@ -55,8 +54,8 @@ window.addEventListener('pagehide', () => { portReady = false; });
 
 function applyConfig(config) {
   if (config?.debounceMs) DEBOUNCE_MS = config.debounceMs;
-  if (config?.platforms?.gemini) {
-    CONFIG_PLATFORM = config.platforms.gemini;
+  if (config?.platforms?.grok) {
+    CONFIG_PLATFORM = config.platforms.grok;
     GENERATING_SELECTOR = CONFIG_PLATFORM.generatingSelector || null;
     LATEST_ASSISTANT_SELECTOR = CONFIG_PLATFORM.latestAssistantSelector || null;
     ASSISTANT_TEXT_SELECTOR = CONFIG_PLATFORM.assistantTextSelector || null;
@@ -98,28 +97,17 @@ function getLatestAssistantElement() {
   const overrideEl = queryLatestAssistantElement();
   if (overrideEl) return overrideEl;
 
-  // Primary: model-response custom element (confirmed current 2026)
-  const modelResponses = document.querySelectorAll('model-response');
-  if (modelResponses.length) {
-    const lastResponse = modelResponses[modelResponses.length - 1];
-    // Try to get message-content inside it for cleaner text
-    const msgContent = lastResponse.querySelector('message-content');
-    return msgContent || lastResponse;
-  }
+  // Grok-specific fallbacks
+  // Grok uses various message container patterns
+  const responseMsgs = document.querySelectorAll('[data-testid*="assistant"], [class*="response-message"], [class*="message-bubble"]');
+  if (responseMsgs.length) return responseMsgs[responseMsgs.length - 1];
 
-  // Fallback: message-content custom elements directly
-  const msgContents = document.querySelectorAll('message-content');
-  if (msgContents.length) return msgContents[msgContents.length - 1];
+  // Try generic markdown/prose containers
+  const markdownEls = document.querySelectorAll('[class*="markdown"], [class*="prose"], [class*="message-text"]');
+  if (markdownEls.length) return markdownEls[markdownEls.length - 1];
 
-  // Fallback: data-turn-role (older versions)
-  const modelTurns = document.querySelectorAll('[data-turn-role="model"], .model-response-text');
-  if (modelTurns.length) return modelTurns[modelTurns.length - 1];
-
-  // Fallback: response containers, prose/markdown
-  const containers = document.querySelectorAll('.message-content, [class*="response-container"]');
-  if (containers.length) return containers[containers.length - 1];
-
-  const messages = document.querySelectorAll('[data-testid*="message"], div[class*="prose"], div[class*="markdown"]');
+  // Last resort: look for message containers
+  const messages = document.querySelectorAll('[data-testid*="message"], [class*="message"]');
   if (messages.length === 0) return null;
   return messages[messages.length - 1];
 }
@@ -128,10 +116,7 @@ function isStillGenerating() {
   if (GENERATING_SELECTOR) {
     try { return !!document.querySelector(GENERATING_SELECTOR); } catch(e) {}
   }
-  // NOTE: bare [class*="loading"] matches 3+ persistent elements in Gemini's
-  // 2026 "Neural Expressive" UI even while idle — using it here would freeze
-  // outbound forever. The Stop button (send→stop swap) is the only reliable cue.
-  return !!document.querySelector('button[aria-label*="Stop" i], [data-test-id*="stop"], [data-testid*="stop"], [aria-busy="true"]');
+  return !!document.querySelector('[class*="loading"], [class*="generating"], [aria-busy="true"], button[aria-label*="Stop"]');
 }
 
 function scheduleStableForward(text, delayMs, callback) {
@@ -140,84 +125,100 @@ function scheduleStableForward(text, delayMs, callback) {
     if (isStillGenerating()) { scheduleStableForward(text, delayMs, callback); return; }
     const el = getLatestAssistantElement();
     const excludeSelectors = CONFIG_PLATFORM?.excludeSelectors || null;
-    const finalText = el ? extractCleanText(el, excludeSelectors) : text;
+    const finalText = stripThinkingPill(el ? extractCleanText(el, excludeSelectors) : text);
     if (finalText && finalText.length >= 3) callback(finalText);
   }, delayMs);
 }
 
+let lastSentText = "";
+
+function stripThinkingPill(t) {
+  // Grok prepends a collapsed "Thought for Ns" pill (sometimes repeated) to replies
+  return (t || '').replace(/^(?:Thought for \d+s\s*)+/i, '').trim();
+}
+
 function processLatestAssistantMessage(element) {
   const excludeSelectors = CONFIG_PLATFORM?.excludeSelectors || null;
-  const messageText = extractCleanText(element, excludeSelectors);
+  const messageText = stripThinkingPill(extractCleanText(element, excludeSelectors));
   if (!messageText || messageText.length < 3) return;
-  if (messageText === lastObservedText) return;
-  lastObservedText = messageText;
+  if (messageText === lastSentText) return;
   scheduleStableForward(messageText, DEBOUNCE_MS, (stableText) => {
+    if (stableText === lastSentText) return;
     const key = simpleHash(stableText);
     if (key === lastSentKey) return;
-    lastSentKey = key;
-    console.log('[AI Ensemble] Sending Gemini response to background');
+    lastSentKey = key; lastSentText = stableText;
+    console.log('[AI Ensemble] Sending Grok response to background');
     safePost({ type: 'MODEL_RESPONSE', data: { platform: PLATFORM, message: stableText, timestamp: Date.now() } });
   });
 }
 
 function startResponseObserver() {
-  console.log('[AI Ensemble] Starting Gemini response observer');
-  const targetNode = document.querySelector('#chat-history') ||
-                     document.querySelector('[data-test-id="chat-history-container"]') ||
-                     document.querySelector('main') ||
-                     document.body;
+  console.log('[AI Ensemble] Starting Grok response observer');
+  const targetNode = document.querySelector('main') || document.body;
   observer = new MutationObserver(() => {
     const el = getLatestAssistantElement();
     if (el) processLatestAssistantMessage(el);
   });
   observer.observe(targetNode, { childList: true, subtree: true, characterData: true });
-  console.log('[AI Ensemble] Observer started on', targetNode.tagName || 'body');
+  console.log('[AI Ensemble] Observer started');
 }
 
 let lastReceivedHash = null;
 
 function clickSendButton() {
-  const btn = document.querySelector('button[aria-label*="Send" i]') ||
-              document.querySelector('.send-button') ||
-              document.querySelector('button[mattooltip*="Send" i]') ||
-              document.querySelector('button[data-test-id*="send"]');
-  if (btn && !btn.disabled) { btn.click(); console.log('[AI Ensemble] Gemini auto-submitted'); }
+  const btn = document.querySelector('button[aria-label*="Send"]') ||
+              document.querySelector('button[aria-label*="send"]') ||
+              document.querySelector('button[data-testid*="send"]') ||
+              document.querySelector('button[type="submit"]') ||
+              document.querySelector('form button:not([aria-label*="Stop"])');
+  if (btn && !btn.disabled) { btn.click(); console.log('[AI Ensemble] Grok auto-submitted'); }
 }
 
 function populateInputField(message, sourcePlatform) {
   const inHash = simpleHash(message);
   if (inHash === lastReceivedHash) return;
   lastReceivedHash = inHash;
-  console.log('[AI Ensemble] Attempting to populate Gemini input field');
-
-  // Gemini input field selectors — updated for 2026 Neural Expressive redesign
-  const inputField = document.querySelector('rich-textarea [contenteditable="true"]') ||
-                     document.querySelector('.ql-editor[contenteditable="true"]') ||
-                     document.querySelector('input-area-v2 [contenteditable="true"]') ||
-                     document.querySelector('[contenteditable="true"]') ||
-                     document.querySelector('textarea') ||
-                     document.querySelector('[role="textbox"]');
-  if (!inputField) { console.error('[AI Ensemble] Could not find Gemini input field'); return; }
+  console.log('[AI Ensemble] Attempting to populate Grok input field');
+  // grok.com's real editor is a contenteditable (role=textbox); the lone <textarea>
+  // is a hidden form mirror, so target the contenteditable first.
+  const inputField = document.querySelector('[contenteditable="true"]') ||
+                     document.querySelector('[role="textbox"]') ||
+                     document.querySelector('textarea');
+  if (!inputField) { console.error('[AI Ensemble] Could not find Grok input field'); return; }
 
   const header = `[From ${sourcePlatform.toUpperCase()}]`;
   const newContent = `${header}\n${message}`;
 
   if (inputField.getAttribute('contenteditable') === 'true') {
-    const p = document.createElement('p');
-    p.textContent = newContent;
-    if (inputField.textContent.trim().length > 0) {
-      const sep = document.createElement('p');
-      sep.textContent = '---';
-      inputField.appendChild(sep);
+    const hasContent = inputField.textContent.trim().length > 0;
+    const insertStr = (hasContent ? '\n---\n' : '') + newContent;
+    inputField.focus();
+    // Move caret to the end of the editor
+    const sel = window.getSelection();
+    try { sel.selectAllChildren(inputField); sel.collapseToEnd(); } catch(e) {}
+    // grok.com uses a Lexical-style rich editor that ignores appendChild — only
+    // execCommand('insertText') routes through its beforeinput model and "takes".
+    let ok = false;
+    try { ok = document.execCommand('insertText', false, insertStr); } catch(e) {}
+    if (!ok) {
+      const p = document.createElement('p');
+      p.textContent = newContent;
+      if (hasContent) { const sep = document.createElement('p'); sep.textContent = '---'; inputField.appendChild(sep); }
+      inputField.appendChild(p);
     }
-    inputField.appendChild(p);
-    inputField.dispatchEvent(new Event('input', { bubbles: true }));
+    inputField.dispatchEvent(new InputEvent('input', { bubbles: true }));
   } else {
     const existing = (inputField.value || '').trim();
-    inputField.value = existing ? existing + '\n---\n' + newContent : newContent;
+    const newVal = existing ? existing + '\n---\n' + newContent : newContent;
+    // React controlled-input fix: use the native prototype setter ONLY. A plain
+    // `inputField.value = ...` first updates React's value tracker, which then
+    // suppresses the change event and reverts the field on next render.
+    const nativeSet = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    if (nativeSet) nativeSet.call(inputField, newVal); else inputField.value = newVal;
     inputField.dispatchEvent(new Event('input', { bubbles: true }));
+    inputField.dispatchEvent(new Event('change', { bubbles: true }));
   }
-  console.log('[AI Ensemble] Gemini input populated');
+  console.log('[AI Ensemble] Grok input populated');
 
   if (autoSubmitEnabled) {
     setTimeout(() => clickSendButton(), 500);
@@ -228,7 +229,7 @@ chrome.runtime.onMessage.addListener((request) => {
   if (request.type === 'POPULATE_INPUT') populateInputField(request.data.message, request.data.sourcePlatform);
 });
 
-console.log('[AI Ensemble] Initializing Gemini integration (v1.8.1)');
+console.log('[AI Ensemble] Initializing Grok integration (v1.8.0)');
 setTimeout(startResponseObserver, 1000);
 
 } // end injection guard

@@ -1,4 +1,4 @@
-// Popup control panel JavaScript - v17.7
+// Popup control panel JavaScript - v1.8.0
 
 document.addEventListener('DOMContentLoaded', () => {
   updateModelStatus();
@@ -8,9 +8,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('clear-log').addEventListener('click', clearLog);
   document.getElementById('export-log').addEventListener('click', exportLog);
   
+  updateAutoSubmitStatus();
+
   setInterval(() => {
     updateModelStatus();
     loadConversationLog();
+    updateAutoSubmitStatus();
   }, 2000);
 });
 
@@ -37,6 +40,12 @@ async function activateCurrentTab() {
     } else if (tab.url.includes('gemini.google.com')) {
       platform = 'gemini';
       scriptFile = 'content-gemini.js';
+    } else if (tab.url.includes('grok.com')) {
+      platform = 'grok';
+      scriptFile = 'content-grok.js';
+    } else if (tab.url.includes('chat.deepseek.com')) {
+      platform = 'deepseek';
+      scriptFile = 'content-deepseek.js';
     } else {
       throw new Error('Not an AI platform tab');
     }
@@ -83,7 +92,7 @@ function updateModelStatus() {
     
     const activeModels = response.models || [];
     
-    ['claude', 'chatgpt', 'gemini'].forEach(model => {
+    ['claude', 'chatgpt', 'gemini', 'grok', 'deepseek'].forEach(model => {
       const card = document.querySelector(`[data-model="${model}"]`);
       if (!card) return;
       const status = card.querySelector('div:last-child');
@@ -102,11 +111,11 @@ function updateModelStatus() {
     const statusLine = document.getElementById('connection-summary');
     if (statusLine) {
       const n = activeModels.length;
-      if (n === 3) {
-        statusLine.textContent = 'All 3 models connected — ready to route!';
+      if (n === 5) {
+        statusLine.textContent = 'All 5 models connected — ready to route!';
         statusLine.style.color = '#00ff88';
       } else if (n > 0) {
-        statusLine.textContent = n + '/3 models connected';
+        statusLine.textContent = n + '/5 models connected';
         statusLine.style.color = '#ffc107';
       } else {
         statusLine.textContent = 'No models connected';
@@ -129,7 +138,7 @@ function loadConversationLog() {
     }
     
     const recentMessages = conversation.slice(-10);
-    const platformColors = { claude: '#d4a574', chatgpt: '#74d4a5', gemini: '#7474d4' };
+    const platformColors = { claude: '#d4a574', chatgpt: '#74d4a5', gemini: '#7474d4', grok: '#d47474', deepseek: '#74b8d4' };
     logContainer.innerHTML = recentMessages.map(entry => {
       const color = platformColors[entry.platform] || '#999';
       return '<div class="log-entry"><div class="log-platform" style="color:' + color + '">' + entry.platform + '</div><div class="log-message">' + truncateMessage(entry.message, 150) + '</div></div>';
@@ -150,6 +159,17 @@ function clearLog() {
       loadConversationLog();
     });
   }
+}
+
+function updateAutoSubmitStatus() {
+  chrome.storage.sync.get(['autoSubmit'], (result) => {
+    const badge = document.getElementById('auto-submit-badge');
+    if (!badge) return;
+    const enabled = !!result?.autoSubmit;
+    badge.textContent = enabled ? 'ON' : 'OFF';
+    badge.style.background = enabled ? 'rgba(0,255,136,0.2)' : 'rgba(255,68,68,0.2)';
+    badge.style.color = enabled ? '#00ff88' : '#ff6666';
+  });
 }
 
 function exportLog() {

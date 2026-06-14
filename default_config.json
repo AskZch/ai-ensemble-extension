@@ -15,16 +15,30 @@
     "claude": {
       "enabled": true,
       "killSwitch": false,
-      "latestAssistantSelector": "[data-testid*=\"message\"]",
+      "latestAssistantSelector": ".font-claude-response:not(#markdown-artifact)",
       "assistantTextSelector": null,
-      "generatingSelector": "button:has(svg[aria-label*=\"Stop\"]), [data-is-streaming=\"true\"]"
+      "generatingSelector": "button[aria-label*=\"Stop\"], button[title*=\"Stop\"], [data-is-streaming=\"true\"]"
     },
     "gemini": {
       "enabled": true,
       "killSwitch": false,
-      "latestAssistantSelector": "[id^=\"model-response-message-content\"], message-content, [id^=\"message-content-id\"]",
-      "assistantTextSelector": null,
+      "latestAssistantSelector": "model-response message-content, model-response, message-content",
+      "assistantTextSelector": "message-content",
       "generatingSelector": "button[aria-label*=\"Stop\"], [data-test-id*=\"stop\"], [data-testid*=\"stop\"]"
+    },
+    "grok": {
+      "enabled": true,
+      "killSwitch": false,
+      "latestAssistantSelector": "[data-testid*=\"assistant\"], [class*=\"message-bubble\"], [class*=\"response-message\"]",
+      "assistantTextSelector": "[class*=\"markdown\"], [class*=\"message-text\"]",
+      "generatingSelector": "button[aria-label*=\"Stop\"], [class*=\"stop\"], [data-testid*=\"stop\"]"
+    },
+    "deepseek": {
+      "enabled": true,
+      "killSwitch": false,
+      "latestAssistantSelector": ".ds-markdown, [data-role=\"assistant\"], [class*=\"assistant-message\"]",
+      "assistantTextSelector": ".ds-markdown, [class*=\"markdown-body\"], [class*=\"markdown\"]",
+      "generatingSelector": "button[aria-label*=\"Stop\"], [class*=\"stop-generating\"], [class*=\"loading\"]"
     }
   }
 }

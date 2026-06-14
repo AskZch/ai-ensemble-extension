@@ -1,6 +1,6 @@
-// Content script for Claude.ai — AI Ensemble v17.7
-// Fixed: data-is-streaming is now primary assistant detection strategy
-// Claude removed .prose classes and only uses user-message testids
+// Content script for Claude.ai — AI Ensemble v1.8.1
+// Updated: .font-claude-response is now primary assistant detection
+// data-is-streaming kept as fallback for older UI versions
 
 if (window.__AI_ENSEMBLE_CLAUDE_V17__) {
   console.log('[AI Ensemble] Claude already injected; skipping.');
@@ -17,6 +17,7 @@ let observer = null;
 // ===============================
 // PORT-BASED MESSAGING
 // ===============================
+let autoSubmitEnabled = false;
 let ensemblePort = null;
 let portReady = false;
 
@@ -38,6 +39,8 @@ function connectPort() {
         populateInputField(msg.data.message, msg.data.sourcePlatform);
       } else if (msg.type === 'CONFIG_RESPONSE' && msg.config) {
         applyConfig(msg.config);
+      } else if (msg.type === 'AUTO_SUBMIT_CHANGED') {
+        autoSubmitEnabled = msg.enabled;
       }
     });
   } catch(e) {
@@ -64,6 +67,10 @@ function safePost(message) {
 
 connectPort();
 
+// bfcache: reconnect the port when the tab is restored from back/forward cache
+window.addEventListener('pageshow', (e) => { if (e.persisted) { portReady = false; ensemblePort = null; connectPort(); } });
+window.addEventListener('pagehide', () => { portReady = false; });
+
 // ===============================
 // CONFIG
 // ===============================
@@ -81,6 +88,9 @@ try {
     if (resp?.config) applyConfig(resp.config);
   });
 } catch(e) {}
+
+// Load auto-submit state
+try { chrome.storage.sync.get(['autoSubmit'], (r) => { autoSubmitEnabled = !!r?.autoSubmit; }); } catch(e) {}
 
 // ===============================
 // HASH UTILITY
@@ -106,30 +116,40 @@ function extractCleanText(element, excludeSelectors) {
   excludeSelectors.forEach(sel => {
     try { clone.querySelectorAll(sel).forEach(el => el.remove()); } catch(e) {}
   });
-  clone.querySelectorAll('button, [role="button"], svg, [aria-hidden="true"]').forEach(el => el.remove());
+  clone.querySelectorAll('button, [role="button"], svg, [aria-hidden="true"], .artifact-block-cell').forEach(el => el.remove());
   return (clone.textContent || "").trim();
 }
 
 // ===============================
-// ASSISTANT ELEMENT DETECTION (v17.7 fix)
+// ASSISTANT ELEMENT DETECTION (v1.8.1)
 // ===============================
 function getLatestAssistantElement() {
+  // Primary: .font-claude-response (current Claude UI 2026)
+  const fontClaude = document.querySelectorAll('.font-claude-response:not(#markdown-artifact)');
+  if (fontClaude.length > 0) {
+    const el = fontClaude[fontClaude.length - 1];
+    const text = (el.textContent || '').trim();
+    if (text.length >= 3) return el;
+  }
+
+  // Fallback 1: data-is-streaming (older Claude UI)
   const completed = document.querySelectorAll('[data-is-streaming="false"]');
   if (completed.length > 0) {
     const el = completed[completed.length - 1];
     const text = (el.textContent || '').trim();
-    if (text.length >= 15) return el;
+    if (text.length >= 3) return el;
   }
 
   const streaming = document.querySelectorAll('[data-is-streaming="true"]');
   if (streaming.length > 0) {
     const el = streaming[streaming.length - 1];
     const text = (el.textContent || '').trim();
-    if (text.length >= 15) return el;
+    if (text.length >= 3) return el;
   }
 
+  // Fallback 2: data-testid based (skip user messages)
   const candidates = Array.from(document.querySelectorAll(
-    '[data-testid$="-message"], [data-testid*="message"], div[class*="grid"][class*="message"]'
+    '[data-testid$="-message"], [data-testid*="message"], .grid-cols-1'
   ));
   for (let i = candidates.length - 1; i >= 0; i--) {
     const el = candidates[i];
@@ -140,17 +160,18 @@ function getLatestAssistantElement() {
     const content = findContentContainer(el);
     if (!content) continue;
     const text = (content.textContent || '').trim();
-    if (text.length < 15) continue;
+    if (text.length < 3) continue;
     return content;
   }
 
+  // Fallback 3: class-based
   const proseEls = Array.from(document.querySelectorAll(
     '.prose, [class*="prose"], [class*="font-claude"], [class*="markdown"]'
   ));
   for (let i = proseEls.length - 1; i >= 0; i--) {
     if (isInsideUserMessage(proseEls[i])) continue;
     const text = (proseEls[i].textContent || '').trim();
-    if (text.length < 15) continue;
+    if (text.length < 3) continue;
     return proseEls[i];
   }
 
@@ -159,7 +180,7 @@ function getLatestAssistantElement() {
 
 function findContentContainer(block) {
   return block.querySelector([
-    '.prose', '[class*="prose"]', '[class*="font-claude"]',
+    '.font-claude-response', '.prose', '[class*="prose"]', '[class*="font-claude"]',
     '[class*="claude-message"]', '[class*="markdown"]',
     '[data-testid*="content"]', 'pre'
   ].join(', '));
@@ -178,13 +199,13 @@ function isInsideUserMessage(el) {
 }
 
 // ===============================
-// GENERATION STATE CHECK (v17.7)
+// GENERATION STATE CHECK (v1.8.1)
 // ===============================
 function isGenerating() {
-  const streaming = document.querySelector('[data-is-streaming="true"]');
-  if (streaming) return true;
-  const stopBtn = document.querySelector('button[aria-label*="Stop"], button[title*="Stop"]');
-  if (stopBtn) return true;
+  if (document.querySelector('[data-is-streaming="true"]')) return true;
+  if (document.querySelector('button[aria-label*="Stop"], button[title*="Stop"]')) return true;
+  // Check for thinking/loading indicators
+  if (document.querySelector('.transition-all[class*="thinking"], [class*="is-streaming"]')) return true;
   return false;
 }
 
@@ -204,10 +225,15 @@ function scheduleStableForward(text, delayMs, callback) {
 
 let lastSentText = "";
 
+function stripThinkingPill(t) {
+  // Claude prepends a collapsed "Thought for Ns" pill (sometimes repeated) to replies
+  return (t || '').replace(/^(?:Thought for \d+s\s*)+/i, '').trim();
+}
+
 function processLatestAssistantMessage(element) {
   const excludeSelectors = CONFIG_PLATFORM?.excludeSelectors || null;
-  const messageText = extractCleanText(element, excludeSelectors);
-  if (!messageText || messageText.length < 15) return;
+  const messageText = stripThinkingPill(extractCleanText(element, excludeSelectors));
+  if (!messageText || messageText.length < 3) return;
   if (messageText === lastSentText) return;
 
   scheduleStableForward(messageText, DEBOUNCE_MS, (stableText) => {
@@ -236,9 +262,9 @@ function startResponseObserver() {
     if (el) processLatestAssistantMessage(el);
   });
 
+  // Watch broadly — don't filter by specific attributes since class-based detection is primary now
   observer.observe(targetNode, {
-    childList: true, subtree: true, characterData: true,
-    attributes: true, attributeFilter: ['data-is-streaming', 'data-testid']
+    childList: true, subtree: true, characterData: true
   });
   console.log('[AI Ensemble] Observer started');
 }
@@ -248,14 +274,23 @@ function startResponseObserver() {
 // ===============================
 let lastReceivedHash = null;
 
+function clickSendButton() {
+  const btn = document.querySelector('button[aria-label="Send Message"]') ||
+              document.querySelector('button[aria-label*="Send"]') ||
+              document.querySelector('button[data-testid*="send"]') ||
+              document.querySelector('fieldset button:not([aria-label*="Stop"])');
+  if (btn && !btn.disabled) { btn.click(); console.log('[AI Ensemble] Claude auto-submitted'); }
+}
+
 function populateInputField(message, sourcePlatform) {
   const inHash = simpleHash(message);
   if (inHash === lastReceivedHash) return;
   lastReceivedHash = inHash;
 
   console.log('[AI Ensemble] Attempting to populate Claude input field');
-  
+
   const inputField = document.querySelector('.ProseMirror[contenteditable="true"]') ||
+                     document.querySelector('[contenteditable="true"][data-testid]') ||
                      document.querySelector('[contenteditable="true"]') ||
                      document.querySelector('textarea') ||
                      document.querySelector('[role="textbox"]');
@@ -284,6 +319,10 @@ function populateInputField(message, sourcePlatform) {
     inputField.dispatchEvent(new Event('input', { bubbles: true }));
   }
   console.log('[AI Ensemble] Claude input populated');
+
+  if (autoSubmitEnabled) {
+    setTimeout(() => clickSendButton(), 500);
+  }
 }
 
 chrome.runtime.onMessage.addListener((request) => {
@@ -295,7 +334,7 @@ chrome.runtime.onMessage.addListener((request) => {
 // ===============================
 // INIT
 // ===============================
-console.log('[AI Ensemble] Initializing Claude.ai integration (v17.7)');
+console.log('[AI Ensemble] Initializing Claude.ai integration (v1.8.1)');
 setTimeout(startResponseObserver, 1000);
 
 } // end injection guard
