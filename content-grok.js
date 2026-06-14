@@ -174,9 +174,11 @@ function populateInputField(message, sourcePlatform) {
   if (inHash === lastReceivedHash) return;
   lastReceivedHash = inHash;
   console.log('[AI Ensemble] Attempting to populate Grok input field');
-  const inputField = document.querySelector('textarea') ||
-                     document.querySelector('[contenteditable="true"]') ||
-                     document.querySelector('[role="textbox"]');
+  // grok.com's real editor is a contenteditable (role=textbox); the lone <textarea>
+  // is a hidden form mirror, so target the contenteditable first.
+  const inputField = document.querySelector('[contenteditable="true"]') ||
+                     document.querySelector('[role="textbox"]') ||
+                     document.querySelector('textarea');
   if (!inputField) { console.error('[AI Ensemble] Could not find Grok input field'); return; }
 
   const header = `[From ${sourcePlatform.toUpperCase()}]`;
@@ -194,12 +196,12 @@ function populateInputField(message, sourcePlatform) {
     inputField.dispatchEvent(new Event('input', { bubbles: true }));
   } else {
     const existing = (inputField.value || '').trim();
-    inputField.value = existing ? existing + '\n---\n' + newContent : newContent;
-    // React-compatible value setter
+    const newVal = existing ? existing + '\n---\n' + newContent : newContent;
+    // React controlled-input fix: use the native prototype setter ONLY. A plain
+    // `inputField.value = ...` first updates React's value tracker, which then
+    // suppresses the change event and reverts the field on next render.
     const nativeSet = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-    if (nativeSet) {
-      nativeSet.call(inputField, inputField.value);
-    }
+    if (nativeSet) nativeSet.call(inputField, newVal); else inputField.value = newVal;
     inputField.dispatchEvent(new Event('input', { bubbles: true }));
     inputField.dispatchEvent(new Event('change', { bubbles: true }));
   }

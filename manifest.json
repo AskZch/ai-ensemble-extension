@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Ensemble",
-  "version": "1.8.0",
+  "version": "1.8.2",
   "description": "Route AI responses between Claude, ChatGPT, Gemini, Grok, and DeepSeek for collaborative problem-solving",
   "permissions": [
     "storage",

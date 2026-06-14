@@ -128,7 +128,10 @@ function isStillGenerating() {
   if (GENERATING_SELECTOR) {
     try { return !!document.querySelector(GENERATING_SELECTOR); } catch(e) {}
   }
-  return !!document.querySelector('.loading-indicator, [class*="loading"], [class*="generating"], [aria-busy="true"], button[aria-label*="Stop"]');
+  // NOTE: bare [class*="loading"] matches 3+ persistent elements in Gemini's
+  // 2026 "Neural Expressive" UI even while idle — using it here would freeze
+  // outbound forever. The Stop button (send→stop swap) is the only reliable cue.
+  return !!document.querySelector('button[aria-label*="Stop" i], [data-test-id*="stop"], [data-testid*="stop"], [aria-busy="true"]');
 }
 
 function scheduleStableForward(text, delayMs, callback) {
@@ -174,10 +177,9 @@ function startResponseObserver() {
 let lastReceivedHash = null;
 
 function clickSendButton() {
-  const btn = document.querySelector('button[aria-label="Send message"]') ||
-              document.querySelector('button[aria-label*="Send"]') ||
+  const btn = document.querySelector('button[aria-label*="Send" i]') ||
               document.querySelector('.send-button') ||
-              document.querySelector('button[mattooltip*="Send"]') ||
+              document.querySelector('button[mattooltip*="Send" i]') ||
               document.querySelector('button[data-test-id*="send"]');
   if (btn && !btn.disabled) { btn.click(); console.log('[AI Ensemble] Gemini auto-submitted'); }
 }
