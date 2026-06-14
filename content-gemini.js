@@ -1,6 +1,6 @@
-// Content script for Gemini — AI Ensemble v17.7
-// Port messaging + Gemini observer
-// v17.7: Input population now appends instead of replacing
+// Content script for Gemini — AI Ensemble v1.8.1
+// Updated: Neural Expressive redesign (May 2026) selectors
+// model-response + message-content custom elements confirmed current
 
 if (window.__AI_ENSEMBLE_GEMINI_V17__) {
   console.log('[AI Ensemble] Gemini already injected; skipping.');
@@ -90,12 +90,31 @@ function queryLatestAssistantElement() {
 }
 
 function getLatestAssistantElement() {
+  // Try config-driven selector first
   const overrideEl = queryLatestAssistantElement();
   if (overrideEl) return overrideEl;
-  const modelTurns = document.querySelectorAll('model-response, .model-response-text, [data-turn-role="model"]');
-  if (modelTurns.length) return modelTurns[modelTurns.length - 1];
-  const msgContents = document.querySelectorAll('.message-content, [class*="response-container"]');
+
+  // Primary: model-response custom element (confirmed current 2026)
+  const modelResponses = document.querySelectorAll('model-response');
+  if (modelResponses.length) {
+    const lastResponse = modelResponses[modelResponses.length - 1];
+    // Try to get message-content inside it for cleaner text
+    const msgContent = lastResponse.querySelector('message-content');
+    return msgContent || lastResponse;
+  }
+
+  // Fallback: message-content custom elements directly
+  const msgContents = document.querySelectorAll('message-content');
   if (msgContents.length) return msgContents[msgContents.length - 1];
+
+  // Fallback: data-turn-role (older versions)
+  const modelTurns = document.querySelectorAll('[data-turn-role="model"], .model-response-text');
+  if (modelTurns.length) return modelTurns[modelTurns.length - 1];
+
+  // Fallback: response containers, prose/markdown
+  const containers = document.querySelectorAll('.message-content, [class*="response-container"]');
+  if (containers.length) return containers[containers.length - 1];
+
   const messages = document.querySelectorAll('[data-testid*="message"], div[class*="prose"], div[class*="markdown"]');
   if (messages.length === 0) return null;
   return messages[messages.length - 1];
@@ -105,7 +124,7 @@ function isStillGenerating() {
   if (GENERATING_SELECTOR) {
     try { return !!document.querySelector(GENERATING_SELECTOR); } catch(e) {}
   }
-  return !!document.querySelector('.loading-indicator, [class*="loading"], [class*="generating"], [aria-busy="true"]');
+  return !!document.querySelector('.loading-indicator, [class*="loading"], [class*="generating"], [aria-busy="true"], button[aria-label*="Stop"]');
 }
 
 function scheduleStableForward(text, delayMs, callback) {
@@ -136,13 +155,16 @@ function processLatestAssistantMessage(element) {
 
 function startResponseObserver() {
   console.log('[AI Ensemble] Starting Gemini response observer');
-  const targetNode = document.querySelector('main') || document.body;
+  const targetNode = document.querySelector('#chat-history') ||
+                     document.querySelector('[data-test-id="chat-history-container"]') ||
+                     document.querySelector('main') ||
+                     document.body;
   observer = new MutationObserver(() => {
     const el = getLatestAssistantElement();
     if (el) processLatestAssistantMessage(el);
   });
   observer.observe(targetNode, { childList: true, subtree: true, characterData: true });
-  console.log('[AI Ensemble] Observer started');
+  console.log('[AI Ensemble] Observer started on', targetNode.tagName || 'body');
 }
 
 let lastReceivedHash = null;
@@ -151,7 +173,8 @@ function clickSendButton() {
   const btn = document.querySelector('button[aria-label="Send message"]') ||
               document.querySelector('button[aria-label*="Send"]') ||
               document.querySelector('.send-button') ||
-              document.querySelector('button[mattooltip*="Send"]');
+              document.querySelector('button[mattooltip*="Send"]') ||
+              document.querySelector('button[data-test-id*="send"]');
   if (btn && !btn.disabled) { btn.click(); console.log('[AI Ensemble] Gemini auto-submitted'); }
 }
 
@@ -160,7 +183,11 @@ function populateInputField(message, sourcePlatform) {
   if (inHash === lastReceivedHash) return;
   lastReceivedHash = inHash;
   console.log('[AI Ensemble] Attempting to populate Gemini input field');
-  const inputField = document.querySelector('.ql-editor[contenteditable="true"]') ||
+
+  // Gemini input field selectors — updated for 2026 Neural Expressive redesign
+  const inputField = document.querySelector('rich-textarea [contenteditable="true"]') ||
+                     document.querySelector('.ql-editor[contenteditable="true"]') ||
+                     document.querySelector('input-area-v2 [contenteditable="true"]') ||
                      document.querySelector('[contenteditable="true"]') ||
                      document.querySelector('textarea') ||
                      document.querySelector('[role="textbox"]');
@@ -195,7 +222,7 @@ chrome.runtime.onMessage.addListener((request) => {
   if (request.type === 'POPULATE_INPUT') populateInputField(request.data.message, request.data.sourcePlatform);
 });
 
-console.log('[AI Ensemble] Initializing Gemini integration (v17.7)');
+console.log('[AI Ensemble] Initializing Gemini integration (v1.8.1)');
 setTimeout(startResponseObserver, 1000);
 
 } // end injection guard
