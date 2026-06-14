@@ -130,7 +130,7 @@ function scheduleStableForward(text, delayMs, callback) {
     const el = getLatestAssistantElement();
     const excludeSelectors = CONFIG_PLATFORM?.excludeSelectors || null;
     const finalText = el ? extractCleanText(el, excludeSelectors) : text;
-    if (finalText && finalText.length >= 15) callback(finalText);
+    if (finalText && finalText.length >= 3) callback(finalText);
   }, delayMs);
 }
 
@@ -139,7 +139,7 @@ let lastSentText = "";
 function processLatestAssistantMessage(element) {
   const excludeSelectors = CONFIG_PLATFORM?.excludeSelectors || null;
   const messageText = extractCleanText(element, excludeSelectors);
-  if (!messageText || messageText.length < 15) return;
+  if (!messageText || messageText.length < 3) return;
   if (messageText === lastSentText) return;
   scheduleStableForward(messageText, DEBOUNCE_MS, (stableText) => {
     if (stableText === lastSentText) return;

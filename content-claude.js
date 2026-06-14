@@ -129,7 +129,7 @@ function getLatestAssistantElement() {
   if (fontClaude.length > 0) {
     const el = fontClaude[fontClaude.length - 1];
     const text = (el.textContent || '').trim();
-    if (text.length >= 15) return el;
+    if (text.length >= 3) return el;
   }
 
   // Fallback 1: data-is-streaming (older Claude UI)
@@ -137,14 +137,14 @@ function getLatestAssistantElement() {
   if (completed.length > 0) {
     const el = completed[completed.length - 1];
     const text = (el.textContent || '').trim();
-    if (text.length >= 15) return el;
+    if (text.length >= 3) return el;
   }
 
   const streaming = document.querySelectorAll('[data-is-streaming="true"]');
   if (streaming.length > 0) {
     const el = streaming[streaming.length - 1];
     const text = (el.textContent || '').trim();
-    if (text.length >= 15) return el;
+    if (text.length >= 3) return el;
   }
 
   // Fallback 2: data-testid based (skip user messages)
@@ -160,7 +160,7 @@ function getLatestAssistantElement() {
     const content = findContentContainer(el);
     if (!content) continue;
     const text = (content.textContent || '').trim();
-    if (text.length < 15) continue;
+    if (text.length < 3) continue;
     return content;
   }
 
@@ -171,7 +171,7 @@ function getLatestAssistantElement() {
   for (let i = proseEls.length - 1; i >= 0; i--) {
     if (isInsideUserMessage(proseEls[i])) continue;
     const text = (proseEls[i].textContent || '').trim();
-    if (text.length < 15) continue;
+    if (text.length < 3) continue;
     return proseEls[i];
   }
 
@@ -225,10 +225,15 @@ function scheduleStableForward(text, delayMs, callback) {
 
 let lastSentText = "";
 
+function stripThinkingPill(t) {
+  // Claude prepends a collapsed "Thought for Ns" pill (sometimes repeated) to replies
+  return (t || '').replace(/^(?:Thought for \d+s\s*)+/i, '').trim();
+}
+
 function processLatestAssistantMessage(element) {
   const excludeSelectors = CONFIG_PLATFORM?.excludeSelectors || null;
-  const messageText = extractCleanText(element, excludeSelectors);
-  if (!messageText || messageText.length < 15) return;
+  const messageText = stripThinkingPill(extractCleanText(element, excludeSelectors));
+  if (!messageText || messageText.length < 3) return;
   if (messageText === lastSentText) return;
 
   scheduleStableForward(messageText, DEBOUNCE_MS, (stableText) => {

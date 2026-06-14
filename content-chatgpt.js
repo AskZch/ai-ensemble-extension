@@ -96,7 +96,7 @@ let lastSentText = "";
 function processLatestAssistantMessage(element) {
   const excludeSelectors = CONFIG_PLATFORM?.excludeSelectors || null;
   const messageText = extractCleanText(element, excludeSelectors);
-  if (!messageText || messageText.length < 15) return;
+  if (!messageText || messageText.length < 3) return;
   if (messageText === lastSentText) return;
   const dedupeSalt = element?.getAttribute?.('data-message-id') || '';
   scheduleStableForward(messageText, DEBOUNCE_MS, (stableText) => {

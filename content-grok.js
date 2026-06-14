@@ -125,17 +125,22 @@ function scheduleStableForward(text, delayMs, callback) {
     if (isStillGenerating()) { scheduleStableForward(text, delayMs, callback); return; }
     const el = getLatestAssistantElement();
     const excludeSelectors = CONFIG_PLATFORM?.excludeSelectors || null;
-    const finalText = el ? extractCleanText(el, excludeSelectors) : text;
-    if (finalText && finalText.length >= 15) callback(finalText);
+    const finalText = stripThinkingPill(el ? extractCleanText(el, excludeSelectors) : text);
+    if (finalText && finalText.length >= 3) callback(finalText);
   }, delayMs);
 }
 
 let lastSentText = "";
 
+function stripThinkingPill(t) {
+  // Grok prepends a collapsed "Thought for Ns" pill (sometimes repeated) to replies
+  return (t || '').replace(/^(?:Thought for \d+s\s*)+/i, '').trim();
+}
+
 function processLatestAssistantMessage(element) {
   const excludeSelectors = CONFIG_PLATFORM?.excludeSelectors || null;
-  const messageText = extractCleanText(element, excludeSelectors);
-  if (!messageText || messageText.length < 15) return;
+  const messageText = stripThinkingPill(extractCleanText(element, excludeSelectors));
+  if (!messageText || messageText.length < 3) return;
   if (messageText === lastSentText) return;
   scheduleStableForward(messageText, DEBOUNCE_MS, (stableText) => {
     if (stableText === lastSentText) return;
@@ -185,15 +190,23 @@ function populateInputField(message, sourcePlatform) {
   const newContent = `${header}\n${message}`;
 
   if (inputField.getAttribute('contenteditable') === 'true') {
-    const p = document.createElement('p');
-    p.textContent = newContent;
-    if (inputField.textContent.trim().length > 0) {
-      const sep = document.createElement('p');
-      sep.textContent = '---';
-      inputField.appendChild(sep);
+    const hasContent = inputField.textContent.trim().length > 0;
+    const insertStr = (hasContent ? '\n---\n' : '') + newContent;
+    inputField.focus();
+    // Move caret to the end of the editor
+    const sel = window.getSelection();
+    try { sel.selectAllChildren(inputField); sel.collapseToEnd(); } catch(e) {}
+    // grok.com uses a Lexical-style rich editor that ignores appendChild — only
+    // execCommand('insertText') routes through its beforeinput model and "takes".
+    let ok = false;
+    try { ok = document.execCommand('insertText', false, insertStr); } catch(e) {}
+    if (!ok) {
+      const p = document.createElement('p');
+      p.textContent = newContent;
+      if (hasContent) { const sep = document.createElement('p'); sep.textContent = '---'; inputField.appendChild(sep); }
+      inputField.appendChild(p);
     }
-    inputField.appendChild(p);
-    inputField.dispatchEvent(new Event('input', { bubbles: true }));
+    inputField.dispatchEvent(new InputEvent('input', { bubbles: true }));
   } else {
     const existing = (inputField.value || '').trim();
     const newVal = existing ? existing + '\n---\n' + newContent : newContent;
