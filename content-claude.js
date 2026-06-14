@@ -67,6 +67,10 @@ function safePost(message) {
 
 connectPort();
 
+// bfcache: reconnect the port when the tab is restored from back/forward cache
+window.addEventListener('pageshow', (e) => { if (e.persisted) { portReady = false; ensemblePort = null; connectPort(); } });
+window.addEventListener('pagehide', () => { portReady = false; });
+
 // ===============================
 // CONFIG
 // ===============================
