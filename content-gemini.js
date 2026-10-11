@@ -1,6 +1,6 @@
-// Content script for Gemini — AI Ensemble v17.7
-// Port messaging + Gemini observer
-// v17.7: Input population now appends instead of replacing
+// Content script for Gemini — AI Ensemble v1.8.1
+// Updated: Neural Expressive redesign (May 2026) selectors
+// model-response + message-content custom elements confirmed current
 
 if (window.__AI_ENSEMBLE_GEMINI_V17__) {
   console.log('[AI Ensemble] Gemini already injected; skipping.');
@@ -18,6 +18,7 @@ let pendingTimer = null;
 let lastObservedText = "";
 let observer = null;
 
+let autoSubmitEnabled = false;
 let ensemblePort = null;
 let portReady = false;
 
@@ -33,6 +34,7 @@ function connectPort() {
     ensemblePort.onMessage.addListener((msg) => {
       if (msg.type === 'POPULATE_INPUT') populateInputField(msg.data.message, msg.data.sourcePlatform);
       else if (msg.type === 'CONFIG_RESPONSE' && msg.config) applyConfig(msg.config);
+      else if (msg.type === 'AUTO_SUBMIT_CHANGED') autoSubmitEnabled = msg.enabled;
     });
   } catch(e) { portReady = false; ensemblePort = null; setTimeout(connectPort, 800); }
 }
@@ -47,6 +49,10 @@ function safePost(message) {
 
 connectPort();
 
+// bfcache: reconnect the port when the tab is restored from back/forward cache
+window.addEventListener('pageshow', (e) => { if (e.persisted) { portReady = false; ensemblePort = null; connectPort(); } });
+window.addEventListener('pagehide', () => { portReady = false; });
+
 function applyConfig(config) {
   if (config?.debounceMs) DEBOUNCE_MS = config.debounceMs;
   if (config?.platforms?.gemini) {
@@ -58,6 +64,9 @@ function applyConfig(config) {
 }
 setTimeout(() => { safePost({ type: 'GET_CONFIG' }); }, 500);
 try { chrome.runtime.sendMessage({ type: 'GET_CONFIG' }, (r) => { if (r?.config) applyConfig(r.config); }); } catch(e) {}
+
+// Load auto-submit state
+try { chrome.storage.sync.get(['autoSubmit'], (r) => { autoSubmitEnabled = !!r?.autoSubmit; }); } catch(e) {}
 
 function simpleHash(str) {
   let hash = 0;
@@ -85,12 +94,31 @@ function queryLatestAssistantElement() {
 }
 
 function getLatestAssistantElement() {
+  // Try config-driven selector first
   const overrideEl = queryLatestAssistantElement();
   if (overrideEl) return overrideEl;
-  const modelTurns = document.querySelectorAll('model-response, .model-response-text, [data-turn-role="model"]');
-  if (modelTurns.length) return modelTurns[modelTurns.length - 1];
-  const msgContents = document.querySelectorAll('.message-content, [class*="response-container"]');
+
+  // Primary: model-response custom element (confirmed current 2026)
+  const modelResponses = document.querySelectorAll('model-response');
+  if (modelResponses.length) {
+    const lastResponse = modelResponses[modelResponses.length - 1];
+    // Try to get message-content inside it for cleaner text
+    const msgContent = lastResponse.querySelector('message-content');
+    return msgContent || lastResponse;
+  }
+
+  // Fallback: message-content custom elements directly
+  const msgContents = document.querySelectorAll('message-content');
   if (msgContents.length) return msgContents[msgContents.length - 1];
+
+  // Fallback: data-turn-role (older versions)
+  const modelTurns = document.querySelectorAll('[data-turn-role="model"], .model-response-text');
+  if (modelTurns.length) return modelTurns[modelTurns.length - 1];
+
+  // Fallback: response containers, prose/markdown
+  const containers = document.querySelectorAll('.message-content, [class*="response-container"]');
+  if (containers.length) return containers[containers.length - 1];
+
   const messages = document.querySelectorAll('[data-testid*="message"], div[class*="prose"], div[class*="markdown"]');
   if (messages.length === 0) return null;
   return messages[messages.length - 1];
@@ -100,7 +128,10 @@ function isStillGenerating() {
   if (GENERATING_SELECTOR) {
     try { return !!document.querySelector(GENERATING_SELECTOR); } catch(e) {}
   }
-  return !!document.querySelector('.loading-indicator, [class*="loading"], [class*="generating"], [aria-busy="true"]');
+  // NOTE: bare [class*="loading"] matches 3+ persistent elements in Gemini's
+  // 2026 "Neural Expressive" UI even while idle — using it here would freeze
+  // outbound forever. The Stop button (send→stop swap) is the only reliable cue.
+  return !!document.querySelector('button[aria-label*="Stop" i], [data-test-id*="stop"], [data-testid*="stop"], [aria-busy="true"]');
 }
 
 function scheduleStableForward(text, delayMs, callback) {
@@ -110,14 +141,14 @@ function scheduleStableForward(text, delayMs, callback) {
     const el = getLatestAssistantElement();
     const excludeSelectors = CONFIG_PLATFORM?.excludeSelectors || null;
     const finalText = el ? extractCleanText(el, excludeSelectors) : text;
-    if (finalText && finalText.length >= 15) callback(finalText);
+    if (finalText && finalText.length >= 3) callback(finalText);
   }, delayMs);
 }
 
 function processLatestAssistantMessage(element) {
   const excludeSelectors = CONFIG_PLATFORM?.excludeSelectors || null;
   const messageText = extractCleanText(element, excludeSelectors);
-  if (!messageText || messageText.length < 15) return;
+  if (!messageText || messageText.length < 3) return;
   if (messageText === lastObservedText) return;
   lastObservedText = messageText;
   scheduleStableForward(messageText, DEBOUNCE_MS, (stableText) => {
@@ -131,23 +162,38 @@ function processLatestAssistantMessage(element) {
 
 function startResponseObserver() {
   console.log('[AI Ensemble] Starting Gemini response observer');
-  const targetNode = document.querySelector('main') || document.body;
+  const targetNode = document.querySelector('#chat-history') ||
+                     document.querySelector('[data-test-id="chat-history-container"]') ||
+                     document.querySelector('main') ||
+                     document.body;
   observer = new MutationObserver(() => {
     const el = getLatestAssistantElement();
     if (el) processLatestAssistantMessage(el);
   });
   observer.observe(targetNode, { childList: true, subtree: true, characterData: true });
-  console.log('[AI Ensemble] Observer started');
+  console.log('[AI Ensemble] Observer started on', targetNode.tagName || 'body');
 }
 
 let lastReceivedHash = null;
+
+function clickSendButton() {
+  const btn = document.querySelector('button[aria-label*="Send" i]') ||
+              document.querySelector('.send-button') ||
+              document.querySelector('button[mattooltip*="Send" i]') ||
+              document.querySelector('button[data-test-id*="send"]');
+  if (btn && !btn.disabled) { btn.click(); console.log('[AI Ensemble] Gemini auto-submitted'); }
+}
 
 function populateInputField(message, sourcePlatform) {
   const inHash = simpleHash(message);
   if (inHash === lastReceivedHash) return;
   lastReceivedHash = inHash;
   console.log('[AI Ensemble] Attempting to populate Gemini input field');
-  const inputField = document.querySelector('.ql-editor[contenteditable="true"]') ||
+
+  // Gemini input field selectors — updated for 2026 Neural Expressive redesign
+  const inputField = document.querySelector('rich-textarea [contenteditable="true"]') ||
+                     document.querySelector('.ql-editor[contenteditable="true"]') ||
+                     document.querySelector('input-area-v2 [contenteditable="true"]') ||
                      document.querySelector('[contenteditable="true"]') ||
                      document.querySelector('textarea') ||
                      document.querySelector('[role="textbox"]');
@@ -172,13 +218,17 @@ function populateInputField(message, sourcePlatform) {
     inputField.dispatchEvent(new Event('input', { bubbles: true }));
   }
   console.log('[AI Ensemble] Gemini input populated');
+
+  if (autoSubmitEnabled) {
+    setTimeout(() => clickSendButton(), 500);
+  }
 }
 
 chrome.runtime.onMessage.addListener((request) => {
   if (request.type === 'POPULATE_INPUT') populateInputField(request.data.message, request.data.sourcePlatform);
 });
 
-console.log('[AI Ensemble] Initializing Gemini integration (v17.7)');
+console.log('[AI Ensemble] Initializing Gemini integration (v1.8.1)');
 setTimeout(startResponseObserver, 1000);
 
 } // end injection guard

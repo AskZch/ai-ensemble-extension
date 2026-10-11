@@ -14,6 +14,7 @@ let lastSentKey = null;
 let pendingTimer = null;
 let observer = null;
 
+let autoSubmitEnabled = false;
 let ensemblePort = null;
 let portReady = false;
 
@@ -29,6 +30,7 @@ function connectPort() {
     ensemblePort.onMessage.addListener((msg) => {
       if (msg.type === 'POPULATE_INPUT') populateInputField(msg.data.message, msg.data.sourcePlatform);
       else if (msg.type === 'CONFIG_RESPONSE' && msg.config) applyConfig(msg.config);
+      else if (msg.type === 'AUTO_SUBMIT_CHANGED') autoSubmitEnabled = msg.enabled;
     });
   } catch(e) { portReady = false; ensemblePort = null; setTimeout(connectPort, 800); }
 }
@@ -43,12 +45,19 @@ function safePost(message) {
 
 connectPort();
 
+// bfcache: reconnect the port when the tab is restored from back/forward cache
+window.addEventListener('pageshow', (e) => { if (e.persisted) { portReady = false; ensemblePort = null; connectPort(); } });
+window.addEventListener('pagehide', () => { portReady = false; });
+
 function applyConfig(config) {
   if (config?.debounceMs) DEBOUNCE_MS = config.debounceMs;
   if (config?.platforms?.chatgpt) CONFIG_PLATFORM = config.platforms.chatgpt;
 }
 setTimeout(() => { safePost({ type: 'GET_CONFIG' }); }, 500);
 try { chrome.runtime.sendMessage({ type: 'GET_CONFIG' }, (r) => { if (r?.config) applyConfig(r.config); }); } catch(e) {}
+
+// Load auto-submit state
+try { chrome.storage.sync.get(['autoSubmit'], (r) => { autoSubmitEnabled = !!r?.autoSubmit; }); } catch(e) {}
 
 function simpleHash(str) {
   let hash = 0;
@@ -87,7 +96,7 @@ let lastSentText = "";
 function processLatestAssistantMessage(element) {
   const excludeSelectors = CONFIG_PLATFORM?.excludeSelectors || null;
   const messageText = extractCleanText(element, excludeSelectors);
-  if (!messageText || messageText.length < 15) return;
+  if (!messageText || messageText.length < 3) return;
   if (messageText === lastSentText) return;
   const dedupeSalt = element?.getAttribute?.('data-message-id') || '';
   scheduleStableForward(messageText, DEBOUNCE_MS, (stableText) => {
@@ -115,6 +124,14 @@ function startResponseObserver() {
 }
 
 let lastReceivedHash = null;
+
+function clickSendButton() {
+  const btn = document.querySelector('button[data-testid="send-button"]') ||
+              document.querySelector('button[aria-label="Send prompt"]') ||
+              document.querySelector('button[aria-label*="Send"]') ||
+              document.querySelector('form button[type="submit"]');
+  if (btn && !btn.disabled) { btn.click(); console.log('[AI Ensemble] ChatGPT auto-submitted'); }
+}
 
 function populateInputField(message, sourcePlatform) {
   const inHash = simpleHash(message);
@@ -146,6 +163,10 @@ function populateInputField(message, sourcePlatform) {
     inputField.dispatchEvent(new Event('input', { bubbles: true }));
   }
   console.log('[AI Ensemble] ChatGPT input populated');
+
+  if (autoSubmitEnabled) {
+    setTimeout(() => clickSendButton(), 500);
+  }
 }
 
 chrome.runtime.onMessage.addListener((request) => {
